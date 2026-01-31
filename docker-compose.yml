@@ -17,7 +17,7 @@ services:
     ports:
       - "8099:8000"
     volumes:
-      - archiveit_data:/data
+      - /mnt/cache/appdata/ArchiveIT/data:/data
     depends_on:
       - redis
 

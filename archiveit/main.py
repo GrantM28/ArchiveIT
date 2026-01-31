@@ -4,28 +4,37 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, HttpUrl
 
 from .settings import settings
-from .db import init_db, db, create_archive, update_archive
+from .db import init_db, db, create_archive
 from .queue import get_queue
 from .tasks import process_archive, guess_kind
 
 app = FastAPI(title="ArchiveIT", version="0.1.0")
 
+# Keep static files INSIDE the package at: archiveit/static/
 STATIC_DIR = Path(__file__).parent / "static"
-app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+
 
 @app.on_event("startup")
 def _startup():
     init_db()
     (Path(settings.data_dir) / "archives").mkdir(parents=True, exist_ok=True)
 
+
+@app.get("/favicon.ico")
+def _favicon():
+    # Avoid noisy 404s in the browser console; the UI sets a data-URL favicon anyway.
+    return Response(status_code=204)
+
+
 class ArchiveRequest(BaseModel):
     url: HttpUrl
     kind: str | None = None  # 'video' or 'page' or None (auto)
+
 
 @app.post("/api/archive")
 def submit_archive(req: ArchiveRequest):
@@ -43,6 +52,7 @@ def submit_archive(req: ArchiveRequest):
 
     return {"id": archive_id, "status": "QUEUED", "kind": kind, "url": str(req.url)}
 
+
 @app.get("/api/archive/{archive_id}")
 def get_archive(archive_id: str):
     with db() as conn:
@@ -57,6 +67,7 @@ def get_archive(archive_id: str):
                 data["meta"] = None
         return data
 
+
 @app.get("/api/archives")
 def list_archives(
     q: str | None = Query(default=None, description="full text search"),
@@ -65,14 +76,14 @@ def list_archives(
     offset: int = Query(default=0, ge=0),
 ):
     with db() as conn:
-        params = []
-        where = []
+        params: list[str] = []
+        where: list[str] = []
+
         if status:
             where.append("a.status = ?")
             params.append(status)
 
         if q:
-            # FTS join
             sql = f"""
               SELECT a.*
               FROM archives a
@@ -82,7 +93,7 @@ def list_archives(
               ORDER BY a.created_at DESC
               LIMIT ? OFFSET ?
             """
-            params2 = [q] + params + [limit, offset]
+            params2 = [q] + params + [str(limit), str(offset)]
             rows = conn.execute(sql, params2).fetchall()
         else:
             sql = f"""
@@ -92,27 +103,31 @@ def list_archives(
               ORDER BY a.created_at DESC
               LIMIT ? OFFSET ?
             """
-            params2 = params + [limit, offset]
+            params2 = params + [str(limit), str(offset)]
             rows = conn.execute(sql, params2).fetchall()
 
         return [dict(r) for r in rows]
 
+
 @app.get("/api/archive/{archive_id}/download")
 def download_primary(archive_id: str):
     with db() as conn:
-        row = conn.execute("SELECT primary_path, title, kind FROM archives WHERE id = ?", (archive_id,)).fetchone()
+        row = conn.execute(
+            "SELECT primary_path, title, kind FROM archives WHERE id = ?",
+            (archive_id,),
+        ).fetchone()
         if not row or not row["primary_path"]:
             raise HTTPException(404, "File not ready")
+
         path = Path(row["primary_path"])
         if not path.exists():
             raise HTTPException(404, "File missing on disk")
 
-        # Friendly filename
         title = (row["title"] or archive_id).strip().replace("/", "-")
-        ext = path.suffix
-        filename = f"{title}{ext}"
+        filename = f"{title}{path.suffix}"
 
         return FileResponse(str(path), filename=filename)
+
 
 @app.delete("/api/archive/{archive_id}")
 def delete_archive(archive_id: str):
@@ -131,3 +146,7 @@ def delete_archive(archive_id: str):
 
     shutil.rmtree(out_dir, ignore_errors=True)
     return {"ok": True}
+
+
+# IMPORTANT: mount the UI LAST so /api/* routes don't get hijacked by StaticFiles.
+app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

@@ -2,53 +2,103 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ArchiveIT</title>
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%2338bdf8'/%3E%3Cstop offset='1' stop-color='%23a78bfa'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='6' y='10' width='52' height='44' rx='10' fill='%230b1020'/%3E%3Cpath d='M18 22h28v6H18zM18 32h20v6H18zM18 42h24v6H18z' fill='url(%23g)'/%3E%3C/svg%3E" />
+
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+  <div class="bg"></div>
+
   <div class="wrap">
-    <header>
+    <header class="top">
       <div class="brand">
-        <div class="logo">A</div>
+        <div class="logo" aria-hidden="true"></div>
         <div>
-          <h1>ArchiveIT</h1>
-          <p class="sub">Paste a URL. Own a permanent copy (legally).</p>
+          <div class="title">ArchiveIT</div>
+          <div class="subtitle">Capture pages & videos. Store locally. Stop losing receipts to time.</div>
         </div>
+      </div>
+
+      <div class="top-actions">
+        <button id="refreshBtn" class="btn btn-ghost" type="button">Refresh</button>
       </div>
     </header>
 
-    <section class="card">
-      <form id="submitForm" class="row">
-        <input id="urlInput" type="url" placeholder="https://..." required />
-        <select id="kindInput" title="Auto-detect or force type">
-          <option value="">Auto</option>
-          <option value="page">Web page → PDF</option>
-          <option value="video">Video → MP4</option>
-        </select>
-        <button type="submit">Archive</button>
-      </form>
-      <div id="submitMsg" class="msg"></div>
-    </section>
+    <main class="grid">
+      <section class="panel">
+        <h2>New archive</h2>
 
-    <section class="card">
-      <div class="row">
-        <input id="searchInput" placeholder="Search title/content…" />
-        <select id="statusInput">
-          <option value="">All</option>
-          <option value="QUEUED">Queued</option>
-          <option value="RUNNING">Running</option>
-          <option value="DONE">Done</option>
-          <option value="ERROR">Error</option>
-        </select>
-        <button id="refreshBtn" type="button">Refresh</button>
-      </div>
-      <div id="list" class="list"></div>
-    </section>
+        <form id="archiveForm" class="form">
+          <label class="field">
+            <span>URL</span>
+            <input id="urlInput" type="url" placeholder="https://example.com/article" required />
+          </label>
 
-    <footer>
-      <span>Local-first. Don’t expose this to the public internet unless you add auth.</span>
+          <div class="row">
+            <label class="field">
+              <span>Type</span>
+              <select id="kindSelect">
+                <option value="">Auto</option>
+                <option value="page">Page</option>
+                <option value="video">Video</option>
+              </select>
+            </label>
+
+            <button class="btn btn-primary" type="submit">Archive</button>
+          </div>
+
+          <div id="status" class="status" role="status" aria-live="polite"></div>
+        </form>
+
+        <div class="tips">
+          <div class="tip">
+            <div class="tip-k">Tip</div>
+            <div class="tip-v">If a site blocks scraping, try the "page" type first. Videos prefer direct links (YouTube/Vimeo/etc).</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Recent archives</h2>
+
+          <div class="filters">
+            <input id="searchInput" class="search" placeholder="Search (title, url, id)" />
+            <select id="statusSelect" class="select">
+              <option value="">All statuses</option>
+              <option value="QUEUED">Queued</option>
+              <option value="RUNNING">Running</option>
+              <option value="DONE">Done</option>
+              <option value="ERROR">Error</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="list" class="list"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span class="muted">API:</span>
+      <code class="chip">/api/archives</code>
+      <span class="muted">•</span>
+      <span class="muted">Downloads:</span>
+      <code class="chip">/api/archive/&lt;id&gt;/download</code>
     </footer>
+  </div>
+
+  <div id="modal" class="modal" aria-hidden="true">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head">
+        <div id="modalTitle" class="modal-title">Details</div>
+        <button class="iconbtn" data-close type="button" aria-label="Close">×</button>
+      </div>
+      <pre id="modalBody" class="modal-body"></pre>
+    </div>
   </div>
 
   <script src="/app.js"></script>

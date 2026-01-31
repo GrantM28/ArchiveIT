@@ -19,3 +19,5 @@ ENV ARCHIVEIT_REDIS_URL=redis://redis:6379/0
 EXPOSE 8000
 
 CMD ["uvicorn","archiveit.main:app","--host","0.0.0.0","--port","8000"]
+
+ENTRYPOINT []
