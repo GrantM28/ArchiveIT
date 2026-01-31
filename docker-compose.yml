@@ -29,9 +29,9 @@ services:
       - ARCHIVEIT_REDIS_URL=redis://redis:6379/0
       - ARCHIVEIT_DATA_DIR=/data
       - ARCHIVEIT_DB_PATH=/data/archiveit.db
-    command: ["python","-m","rq","worker","archiveit","--url","redis://redis:6379/0"]
+    command: ["rq", "worker", "archiveit", "--url", "redis://redis:6379/0"]
     volumes:
-      - archiveit_data:/data
+      - /mnt/cache/appdata/archiveit:/data
     depends_on:
       - redis
 
