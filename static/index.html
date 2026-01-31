@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ArchiveIT</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="logo">A</div>
+        <div>
+          <h1>ArchiveIT</h1>
+          <p class="sub">Paste a URL. Own a permanent copy (legally).</p>
+        </div>
+      </div>
+    </header>
+
+    <section class="card">
+      <form id="submitForm" class="row">
+        <input id="urlInput" type="url" placeholder="https://..." required />
+        <select id="kindInput" title="Auto-detect or force type">
+          <option value="">Auto</option>
+          <option value="page">Web page → PDF</option>
+          <option value="video">Video → MP4</option>
+        </select>
+        <button type="submit">Archive</button>
+      </form>
+      <div id="submitMsg" class="msg"></div>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <input id="searchInput" placeholder="Search title/content…" />
+        <select id="statusInput">
+          <option value="">All</option>
+          <option value="QUEUED">Queued</option>
+          <option value="RUNNING">Running</option>
+          <option value="DONE">Done</option>
+          <option value="ERROR">Error</option>
+        </select>
+        <button id="refreshBtn" type="button">Refresh</button>
+      </div>
+      <div id="list" class="list"></div>
+    </section>
+
+    <footer>
+      <span>Local-first. Don’t expose this to the public internet unless you add auth.</span>
+    </footer>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

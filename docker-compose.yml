@@ -1,0 +1,40 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: archiveit-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+  api:
+    build: .
+    container_name: archiveit-api
+    restart: unless-stopped
+    environment:
+      - ARCHIVEIT_REDIS_URL=redis://redis:6379/0
+      - ARCHIVEIT_DATA_DIR=/data
+      - ARCHIVEIT_DB_PATH=/data/archiveit.db
+    ports:
+      - "8099:8000"
+    volumes:
+      - archiveit_data:/data
+    depends_on:
+      - redis
+
+  worker:
+    build: .
+    container_name: archiveit-worker
+    restart: unless-stopped
+    environment:
+      - ARCHIVEIT_REDIS_URL=redis://redis:6379/0
+      - ARCHIVEIT_DATA_DIR=/data
+      - ARCHIVEIT_DB_PATH=/data/archiveit.db
+    command: ["python","-m","rq","worker","archiveit","--url","redis://redis:6379/0"]
+    volumes:
+      - archiveit_data:/data
+    depends_on:
+      - redis
+
+volumes:
+  archiveit_data:
+  redis_data:
