@@ -1,152 +1,79 @@
-import json
-import shutil
-from pathlib import Path
-from uuid import uuid4
+from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, Response
+import os
+from pathlib import Path
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, HttpUrl
 
-from .settings import settings
-from .db import init_db, db, create_archive
-from .queue import get_queue
-from .tasks import process_archive, guess_kind
+from .db import init_db, create_archive, list_archives, set_status, get_archive, delete_archive
+from .queue import enqueue_capture
 
-app = FastAPI(title="ArchiveIT", version="0.1.0")
+app = FastAPI(title="ArchiveIT")
 
-# Keep static files INSIDE the package at: archiveit/static/
-STATIC_DIR = Path(__file__).parent / "static"
+# ---- API models ----
+class CreateArchiveBody(BaseModel):
+    url: HttpUrl
+    kind: str = "article"  # article | video
 
 
+# ---- API routes ----
 @app.on_event("startup")
 def _startup():
     init_db()
-    (Path(settings.data_dir) / "archives").mkdir(parents=True, exist_ok=True)
-
-
-@app.get("/favicon.ico")
-def _favicon():
-    # Avoid noisy 404s in the browser console; the UI sets a data-URL favicon anyway.
-    return Response(status_code=204)
-
-
-class ArchiveRequest(BaseModel):
-    url: HttpUrl
-    kind: str | None = None  # 'video' or 'page' or None (auto)
-
-
-@app.post("/api/archive")
-def submit_archive(req: ArchiveRequest):
-    archive_id = str(uuid4())
-    kind = req.kind or guess_kind(str(req.url))
-
-    out_dir = str(Path(settings.data_dir) / "archives" / archive_id)
-
-    with db() as conn:
-        create_archive(conn, archive_id, str(req.url), kind, out_dir)
-        conn.commit()
-
-    q = get_queue()
-    q.enqueue(process_archive, archive_id, str(req.url), kind)
-
-    return {"id": archive_id, "status": "QUEUED", "kind": kind, "url": str(req.url)}
-
-
-@app.get("/api/archive/{archive_id}")
-def get_archive(archive_id: str):
-    with db() as conn:
-        row = conn.execute("SELECT * FROM archives WHERE id = ?", (archive_id,)).fetchone()
-        if not row:
-            raise HTTPException(404, "Not found")
-        data = dict(row)
-        if data.get("meta_json"):
-            try:
-                data["meta"] = json.loads(data["meta_json"])
-            except Exception:
-                data["meta"] = None
-        return data
 
 
 @app.get("/api/archives")
-def list_archives(
-    q: str | None = Query(default=None, description="full text search"),
-    status: str | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
-):
-    with db() as conn:
-        params: list[str] = []
-        where: list[str] = []
-
-        if status:
-            where.append("a.status = ?")
-            params.append(status)
-
-        if q:
-            sql = f"""
-              SELECT a.*
-              FROM archives a
-              JOIN archives_fts f ON f.id = a.id
-              WHERE archives_fts MATCH ?
-              {"AND " + " AND ".join(where) if where else ""}
-              ORDER BY a.created_at DESC
-              LIMIT ? OFFSET ?
-            """
-            params2 = [q] + params + [str(limit), str(offset)]
-            rows = conn.execute(sql, params2).fetchall()
-        else:
-            sql = f"""
-              SELECT a.*
-              FROM archives a
-              {"WHERE " + " AND ".join(where) if where else ""}
-              ORDER BY a.created_at DESC
-              LIMIT ? OFFSET ?
-            """
-            params2 = params + [str(limit), str(offset)]
-            rows = conn.execute(sql, params2).fetchall()
-
-        return [dict(r) for r in rows]
+def api_list_archives():
+    return list_archives()
 
 
-@app.get("/api/archive/{archive_id}/download")
-def download_primary(archive_id: str):
-    with db() as conn:
-        row = conn.execute(
-            "SELECT primary_path, title, kind FROM archives WHERE id = ?",
-            (archive_id,),
-        ).fetchone()
-        if not row or not row["primary_path"]:
-            raise HTTPException(404, "File not ready")
+@app.post("/api/archive")
+def api_create_archive(body: CreateArchiveBody):
+    if body.kind not in ("article", "video"):
+        raise HTTPException(status_code=400, detail="kind must be 'article' or 'video'")
 
-        path = Path(row["primary_path"])
-        if not path.exists():
-            raise HTTPException(404, "File missing on disk")
-
-        title = (row["title"] or archive_id).strip().replace("/", "-")
-        filename = f"{title}{path.suffix}"
-
-        return FileResponse(str(path), filename=filename)
+    rec = create_archive(str(body.url), body.kind)
+    enqueue_capture(rec["id"])
+    return rec
 
 
-@app.delete("/api/archive/{archive_id}")
-def delete_archive(archive_id: str):
-    if not settings.allow_delete:
-        raise HTTPException(403, "Delete disabled")
-
-    with db() as conn:
-        row = conn.execute("SELECT out_dir FROM archives WHERE id = ?", (archive_id,)).fetchone()
-        if not row:
-            raise HTTPException(404, "Not found")
-
-        out_dir = Path(row["out_dir"])
-        conn.execute("DELETE FROM archives_fts WHERE id = ?", (archive_id,))
-        conn.execute("DELETE FROM archives WHERE id = ?", (archive_id,))
-        conn.commit()
-
-    shutil.rmtree(out_dir, ignore_errors=True)
+@app.post("/api/archive/{archive_id}/process")
+def api_process_again(archive_id: int):
+    rec = get_archive(archive_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Archive not found")
+    enqueue_capture(archive_id)
     return {"ok": True}
 
 
-# IMPORTANT: mount the UI LAST so /api/* routes don't get hijacked by StaticFiles.
-app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+@app.get("/api/archive/{archive_id}/download")
+def api_download(archive_id: int):
+    rec = get_archive(archive_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Archive not found")
+    path = rec.get("primary_path")
+    if not path or not Path(path).exists():
+        raise HTTPException(status_code=404, detail="File not ready")
+    return FileResponse(path, filename=Path(path).name)
+
+
+@app.delete("/api/archive/{archive_id}")
+def api_delete(archive_id: int):
+    rec = get_archive(archive_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="Archive not found")
+    delete_archive(archive_id)
+    return {"ok": True}
+
+
+# ---- Static UI (MUST be LAST so it doesn't swallow /api) ----
+STATIC_DIR = Path(__file__).parent / "static"
+if STATIC_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+else:
+    # API still works even if UI folder is missing
+    @app.get("/")
+    def _no_ui():
+        return {"ok": True, "ui": "missing", "expected": str(STATIC_DIR)}

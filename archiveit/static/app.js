@@ -1,192 +1,240 @@
-const form = document.getElementById("archiveForm");
-const urlInput = document.getElementById("urlInput");
-const kindSelect = document.getElementById("kindSelect");
-const statusEl = document.getElementById("status");
-const listEl = document.getElementById("list");
-const searchInput = document.getElementById("searchInput");
-const statusSelect = document.getElementById("statusSelect");
-const refreshBtn = document.getElementById("refreshBtn");
+const $ = (s) => document.querySelector(s);
 
-const modal = document.getElementById("modal");
-const modalTitle = document.getElementById("modalTitle");
-const modalBody = document.getElementById("modalBody");
+const els = {
+  url: $("#url"),
+  kind: $("#kind"),
+  go: $("#go"),
+  refresh: $("#refresh"),
+  toggleAuto: $("#toggleAuto"),
+  list: $("#list"),
+  empty: $("#empty"),
+  toasts: $("#toasts"),
+  apiStatus: $("#apiStatus"),
+  search: $("#search"),
+  filter: $("#filter"),
+  statTotal: $("#statTotal"),
+  statActive: $("#statActive"),
+  statDone: $("#statDone"),
+};
 
-let refreshing = false;
+let autoOn = true;
+let autoTimer = null;
+let lastData = [];
 
-function openModal(title, body) {
-  modalTitle.textContent = title || "Details";
-  modalBody.textContent = body || "";
-  modal.setAttribute("aria-hidden", "false");
-}
-function closeModal() {
-  modal.setAttribute("aria-hidden", "true");
-}
-
-modal.addEventListener("click", (e) => {
-  if (e.target.matches("[data-close]")) closeModal();
-});
-window.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeModal();
-});
-
-function setStatus(html) {
-  statusEl.innerHTML = html || "";
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[m]));
 }
 
-function escapeHtml(str) {
-  return String(str ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+function toast(title, msg, type = "good") {
+  const div = document.createElement("div");
+  div.className = `toast ${type}`;
+  div.innerHTML = `<div class="toast__title">${escapeHtml(title)}</div>
+                   <div class="toast__msg">${escapeHtml(msg)}</div>`;
+  els.toasts.appendChild(div);
+  setTimeout(() => div.remove(), 3200);
 }
 
-function tryHost(url) {
-  try { return new URL(url).host; } catch { return url; }
-}
+async function api(path, { method = "GET", body } = {}) {
+  const opts = { method, headers: {} };
+  if (body !== undefined) {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
 
-function fmtTime(iso) {
-  try { return new Date(iso).toLocaleString(); } catch { return iso || ""; }
-}
-
-function statusPill(s) {
-  const st = (s || "").toUpperCase();
-  if (st === "DONE") return `<span class="pill good"><span class="dot"></span>DONE</span>`;
-  if (st === "ERROR") return `<span class="pill bad"><span class="dot"></span>ERROR</span>`;
-  if (st === "RUNNING") return `<span class="pill run"><span class="dot"></span>RUNNING</span>`;
-  if (st === "QUEUED") return `<span class="pill warn"><span class="dot"></span>QUEUED</span>`;
-  return `<span class="pill"><span class="dot"></span>${escapeHtml(st || "UNKNOWN")}</span>`;
-}
-
-async function api(path, opts = {}) {
   const res = await fetch(path, opts);
-  const ct = (res.headers.get("content-type") || "").toLowerCase();
-  const isJson = ct.includes("application/json");
-
-  let body;
-  try { body = isJson ? await res.json() : await res.text(); }
-  catch { body = isJson ? null : ""; }
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
 
   if (!res.ok) {
-    let msg = res.statusText || "Request failed";
-    if (body && typeof body === "object") msg = body.detail || body.error || JSON.stringify(body);
-    else if (typeof body === "string" && body.trim()) msg = body.trim();
-    throw new Error(msg);
+    const detail = (data && data.detail) ? data.detail : `HTTP ${res.status}`;
+    throw new Error(detail);
   }
-  return body;
+  return data;
+}
+
+function kindEmoji(kind) {
+  return kind === "video" ? "🎥" : "📰";
+}
+
+function setApiPill(ok, msg) {
+  els.apiStatus.classList.toggle("good", ok);
+  els.apiStatus.classList.toggle("bad", !ok);
+  els.apiStatus.textContent = ok ? `API: OK` : `API: ${msg}`;
+}
+
+function setLoading(on) {
+  els.go.classList.toggle("is-loading", on);
+  els.go.disabled = on;
+}
+
+function computeStats(rows) {
+  const total = rows.length;
+  const active = rows.filter(r => r.status === "PENDING" || r.status === "RUNNING").length;
+  const done = rows.filter(r => r.status === "DONE").length;
+  els.statTotal.textContent = total;
+  els.statActive.textContent = active;
+  els.statDone.textContent = done;
+}
+
+function applyFilters(rows) {
+  const q = (els.search.value || "").trim().toLowerCase();
+  const f = els.filter.value;
+
+  return rows.filter(r => {
+    if (f !== "all" && r.status !== f) return false;
+    if (!q) return true;
+    return (r.title || "").toLowerCase().includes(q) || (r.url || "").toLowerCase().includes(q);
+  });
+}
+
+function render(rows) {
+  computeStats(rows);
+
+  const filtered = applyFilters(rows);
+  els.list.innerHTML = "";
+
+  if (!filtered.length) {
+    els.empty.hidden = rows.length !== 0; // show "empty" only when there are truly none
+    if (rows.length !== 0) {
+      els.empty.hidden = false;
+      els.empty.querySelector(".empty__icon").textContent = "🔎";
+      els.empty.querySelector(".empty__title").textContent = "No matches";
+      els.empty.querySelector(".empty__sub").textContent = "Try a different search or filter.";
+    }
+    return;
+  }
+
+  els.empty.hidden = true;
+
+  for (const r of filtered) {
+    const item = document.createElement("div");
+    item.className = "item";
+
+    const title = r.title || "(untitled)";
+    const url = r.url || "";
+    const status = r.status || "PENDING";
+    const kind = r.kind || "article";
+
+    const canDownload = status === "DONE" && r.primary_path;
+
+    item.innerHTML = `
+      <div class="item__left">
+        <div class="badgeKind" title="${escapeHtml(kind)}">${kindEmoji(kind)}</div>
+        <div class="item__meta">
+          <div class="item__title" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
+          <div class="item__url" title="${escapeHtml(url)}">${escapeHtml(url)}</div>
+        </div>
+      </div>
+      <div class="item__right">
+        <span class="status ${escapeHtml(status)}">${escapeHtml(status)}</span>
+        <button class="smallBtn" data-act="reprocess" title="Re-run capture">Reprocess</button>
+        <button class="smallBtn" data-act="open" title="Open original URL">Open</button>
+        <button class="smallBtn" data-act="download" ${canDownload ? "" : "disabled"} title="Download archive">Download</button>
+        <button class="smallBtn danger" data-act="delete" title="Delete record">Delete</button>
+      </div>
+    `;
+
+    item.addEventListener("click", async (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+
+      const act = btn.dataset.act;
+      try {
+        if (act === "open") {
+          window.open(url, "_blank", "noopener,noreferrer");
+          return;
+        }
+
+        if (act === "download") {
+          if (!canDownload) return;
+          window.location.href = `/api/archive/${r.id}/download`;
+          return;
+        }
+
+        if (act === "reprocess") {
+          btn.disabled = true;
+          await api(`/api/archive/${r.id}/process`, { method: "POST" });
+          toast("Queued", "Reprocess started.", "good");
+          await refresh();
+          return;
+        }
+
+        if (act === "delete") {
+          if (!confirm(`Delete archive #${r.id}?`)) return;
+          btn.disabled = true;
+          await api(`/api/archive/${r.id}`, { method: "DELETE" });
+          toast("Deleted", "Archive removed.", "good");
+          await refresh();
+          return;
+        }
+      } catch (err) {
+        toast("Error", err.message || String(err), "bad");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    els.list.appendChild(item);
+  }
 }
 
 async function refresh() {
-  if (refreshing) return;
-  refreshing = true;
-
   try {
-    const params = new URLSearchParams();
-    const q = (searchInput.value || "").trim();
-    const status = (statusSelect.value || "").trim();
-    if (q) params.set("q", q);
-    if (status) params.set("status", status);
-
-    const qs = params.toString();
-    const data = await api(`/api/archives${qs ? "?" + qs : ""}`);
-
-    if (!Array.isArray(data) || data.length === 0) {
-      listEl.innerHTML = `<div class="empty">No archives yet. Add one on the left.</div>`;
-      return;
-    }
-
-    listEl.innerHTML = data.map(renderItem).join("");
-  } catch (e) {
-    listEl.innerHTML = `<div class="empty">Can't load archives. Check the API logs.</div>`;
-    openModal("Refresh failed", String(e?.message || e));
-  } finally {
-    refreshing = false;
-  }
-}
-
-function renderItem(a) {
-  const id = escapeHtml(a.id);
-  const kind = escapeHtml(a.kind || "page");
-  const url = escapeHtml(a.url || "");
-  const host = escapeHtml(tryHost(a.url || ""));
-  const created = escapeHtml(fmtTime(a.created_at));
-  const title = escapeHtml(a.title || host || a.id);
-
-  const downloadBtn =
-    (a.status || "").toUpperCase() === "DONE"
-      ? `<a class="btn small" href="/api/archive/${id}/download" target="_blank" rel="noreferrer">Download</a>`
-      : `<button class="btn small" type="button" disabled>Download</button>`;
-
-  return `
-    <div class="item">
-      <div class="kind" data-kind="${kind}">${kind.toUpperCase()}</div>
-
-      <div class="item-main">
-        <div class="item-title">${title}</div>
-        <div class="item-meta">
-          ${statusPill(a.status)}
-          <span class="chip">${created}</span>
-          <span class="chip">${host}</span>
-        </div>
-        <div class="item-meta" style="margin-top:8px">
-          <span class="muted">URL:</span> <span>${url}</span>
-        </div>
-      </div>
-
-      <div class="item-actions">
-        ${downloadBtn}
-        <button class="btn small" type="button" data-details="${id}">Details</button>
-      </div>
-    </div>
-  `;
-}
-
-listEl.addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-details]");
-  if (!btn) return;
-
-  const id = btn.getAttribute("data-details");
-  try {
-    const a = await api(`/api/archive/${encodeURIComponent(id)}`);
-    openModal(`Archive ${id}`, JSON.stringify(a, null, 2));
+    const rows = await api("/api/archives");
+    lastData = Array.isArray(rows) ? rows : [];
+    setApiPill(true);
+    render(lastData);
   } catch (err) {
-    openModal("Details failed", String(err?.message || err));
+    setApiPill(false, err.message || "down");
+    // Don't spam alerts; just keep UI calm.
+    console.error(err);
   }
-});
+}
 
-refreshBtn.addEventListener("click", refresh);
-searchInput.addEventListener("input", () => {
-  clearTimeout(searchInput._t);
-  searchInput._t = setTimeout(refresh, 200);
-});
-statusSelect.addEventListener("change", refresh);
+async function createArchive() {
+  const url = (els.url.value || "").trim();
+  const kind = els.kind.value;
 
-form.addEventListener("submit", async (e) => {
-  e.preventDefault();
+  if (!url) {
+    toast("Missing URL", "Paste a website link first.", "bad");
+    els.url.focus();
+    return;
+  }
 
-  const url = (urlInput.value || "").trim();
-  if (!url) return;
-
-  const kind = (kindSelect.value || "").trim() || null;
-
+  setLoading(true);
   try {
-    setStatus(`<span class="spin"></span>Queued…`);
-    const res = await api("/api/archive", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, kind }),
-    });
-
-    setStatus(`<span class="ok">Queued:</span> <span class="chip">${escapeHtml(res.id)}</span>`);
-    urlInput.value = "";
-    kindSelect.value = "";
+    await api("/api/archive", { method: "POST", body: { url, kind } });
+    toast("Queued", "Capture job queued.", "good");
+    els.url.value = "";
     await refresh();
   } catch (err) {
-    setStatus(`<span class="bad">Error:</span> ${escapeHtml(err?.message || err)}`);
-    openModal("Archive failed", String(err?.message || err));
+    toast("Failed", err.message || String(err), "bad");
+  } finally {
+    setLoading(false);
   }
+}
+
+function setAuto(on) {
+  autoOn = on;
+  els.toggleAuto.dataset.on = on ? "1" : "0";
+  els.toggleAuto.textContent = `Auto refresh: ${on ? "On" : "Off"}`;
+
+  if (autoTimer) clearInterval(autoTimer);
+  if (on) autoTimer = setInterval(() => refresh(), 2500);
+}
+
+els.go.addEventListener("click", createArchive);
+els.refresh.addEventListener("click", () => refresh());
+els.toggleAuto.addEventListener("click", () => setAuto(!autoOn));
+els.search.addEventListener("input", () => render(lastData));
+els.filter.addEventListener("change", () => render(lastData));
+
+els.url.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") createArchive();
 });
 
-setInterval(refresh, 8000);
+setAuto(true);
 refresh();

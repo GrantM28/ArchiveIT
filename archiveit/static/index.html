@@ -2,104 +2,110 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>ArchiveIT</title>
 
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%2338bdf8'/%3E%3Cstop offset='1' stop-color='%23a78bfa'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='6' y='10' width='52' height='44' rx='10' fill='%230b1020'/%3E%3Cpath d='M18 22h28v6H18zM18 32h20v6H18zM18 42h24v6H18z' fill='url(%23g)'/%3E%3C/svg%3E" />
+  <!-- Inline favicon so you don't get /favicon.ico 404 spam -->
+  <link rel="icon"
+    href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="%23a78bfa"/><stop offset="1" stop-color="%2322d3ee"/></linearGradient></defs><rect x="10" y="8" width="44" height="48" rx="10" fill="%23101828"/><path d="M18 18h28v6H18zM18 30h20v6H18zM18 42h24v6H18z" fill="url(%23g)"/></svg>' />
 
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div class="bg"></div>
+  <div class="bg">
+    <div class="bg__glow bg__glow--a"></div>
+    <div class="bg__glow bg__glow--b"></div>
+    <div class="bg__grid"></div>
+  </div>
 
-  <div class="wrap">
+  <main class="wrap">
     <header class="top">
       <div class="brand">
-        <div class="logo" aria-hidden="true"></div>
-        <div>
-          <div class="title">ArchiveIT</div>
-          <div class="subtitle">Capture pages & videos. Store locally. Stop losing receipts to time.</div>
+        <div class="brand__mark" aria-hidden="true"></div>
+        <div class="brand__text">
+          <h1>ArchiveIT</h1>
+          <p>Grab a URL, snapshot it, and keep it. Local-first. No fluff.</p>
         </div>
       </div>
 
-      <div class="top-actions">
-        <button id="refreshBtn" class="btn btn-ghost" type="button">Refresh</button>
+      <div class="stats">
+        <div class="stat">
+          <div class="stat__label">Total</div>
+          <div class="stat__value" id="statTotal">—</div>
+        </div>
+        <div class="stat">
+          <div class="stat__label">Queued/Running</div>
+          <div class="stat__value" id="statActive">—</div>
+        </div>
+        <div class="stat">
+          <div class="stat__label">Done</div>
+          <div class="stat__value" id="statDone">—</div>
+        </div>
       </div>
     </header>
 
-    <main class="grid">
-      <section class="panel">
-        <h2>New archive</h2>
-
-        <form id="archiveForm" class="form">
-          <label class="field">
-            <span>URL</span>
-            <input id="urlInput" type="url" placeholder="https://example.com/article" required />
-          </label>
-
-          <div class="row">
-            <label class="field">
-              <span>Type</span>
-              <select id="kindSelect">
-                <option value="">Auto</option>
-                <option value="page">Page</option>
-                <option value="video">Video</option>
-              </select>
-            </label>
-
-            <button class="btn btn-primary" type="submit">Archive</button>
+    <section class="card formCard">
+      <div class="formRow">
+        <label class="field">
+          <span class="field__label">Website URL</span>
+          <div class="field__control">
+            <span class="icon" aria-hidden="true">🔗</span>
+            <input id="url" type="url" placeholder="https://example.com/article" autocomplete="off" />
           </div>
+        </label>
 
-          <div id="status" class="status" role="status" aria-live="polite"></div>
-        </form>
-
-        <div class="tips">
-          <div class="tip">
-            <div class="tip-k">Tip</div>
-            <div class="tip-v">If a site blocks scraping, try the "page" type first. Videos prefer direct links (YouTube/Vimeo/etc).</div>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Recent archives</h2>
-
-          <div class="filters">
-            <input id="searchInput" class="search" placeholder="Search (title, url, id)" />
-            <select id="statusSelect" class="select">
-              <option value="">All statuses</option>
-              <option value="QUEUED">Queued</option>
-              <option value="RUNNING">Running</option>
-              <option value="DONE">Done</option>
-              <option value="ERROR">Error</option>
+        <label class="field field--small">
+          <span class="field__label">Type</span>
+          <div class="field__control">
+            <span class="icon" aria-hidden="true">⚙️</span>
+            <select id="kind">
+              <option value="article">Article</option>
+              <option value="video">Video</option>
             </select>
           </div>
-        </div>
+        </label>
 
-        <div id="list" class="list"></div>
-      </section>
-    </main>
-
-    <footer class="footer">
-      <span class="muted">API:</span>
-      <code class="chip">/api/archives</code>
-      <span class="muted">•</span>
-      <span class="muted">Downloads:</span>
-      <code class="chip">/api/archive/&lt;id&gt;/download</code>
-    </footer>
-  </div>
-
-  <div id="modal" class="modal" aria-hidden="true">
-    <div class="modal-backdrop" data-close></div>
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-      <div class="modal-head">
-        <div id="modalTitle" class="modal-title">Details</div>
-        <button class="iconbtn" data-close type="button" aria-label="Close">×</button>
+        <button class="btn btn--primary" id="go">
+          <span class="btn__text">Archive</span>
+          <span class="btn__spinner" aria-hidden="true"></span>
+        </button>
       </div>
-      <pre id="modalBody" class="modal-body"></pre>
-    </div>
-  </div>
+
+      <div class="formMeta">
+        <div class="pill" id="apiStatus">API: checking…</div>
+        <div class="actions">
+          <button class="btn btn--ghost" id="refresh">Refresh</button>
+          <button class="btn btn--ghost" id="toggleAuto" data-on="1">Auto refresh: On</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card listCard">
+      <div class="listHead">
+        <h2>Archives</h2>
+        <div class="listTools">
+          <input id="search" class="search" placeholder="Search title / url…" />
+          <select id="filter" class="filter">
+            <option value="all">All</option>
+            <option value="PENDING">Pending</option>
+            <option value="RUNNING">Running</option>
+            <option value="DONE">Done</option>
+            <option value="ERROR">Error</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="list" class="list"></div>
+
+      <div id="empty" class="empty" hidden>
+        <div class="empty__icon">📦</div>
+        <div class="empty__title">Nothing archived yet</div>
+        <div class="empty__sub">Paste a URL above and hit Archive.</div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toasts" class="toasts" aria-live="polite" aria-atomic="true"></div>
 
   <script src="/app.js"></script>
 </body>
